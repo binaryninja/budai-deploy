@@ -200,20 +200,15 @@ class DeploymentOrchestrator:
                         "BUDAI_AGENT_SUMMARIZER_URL": f"http://budai-agent-summarizer.railway.internal:{SERVICE_REPOS['agent-summarizer']['port']}",
                     })
                 
-                # Set environment variables
-                env_id = self.provider._get_environment_id(
-                    self.creds["railway_project_id"],
-                    self.environment
-                )
-                
-                for key, value in env_vars.items():
-                    if value:  # Only set non-empty values
-                        self.provider.set_variable(
-                            service_id,
-                            key,
-                            value,
-                            environment_id=env_id
-                        )
+                # Set environment variables (filter out empty values)
+                non_empty_vars = {k: v for k, v in env_vars.items() if v}
+                if non_empty_vars:
+                    self.provider.set_environment_variables(
+                        service_id=service_id,
+                        environment=self.environment,
+                        variables=non_empty_vars,
+                        project_id=self.creds["railway_project_id"]
+                    )
                 
                 logger.info("✓ %s: Deployed successfully (service ID: %s)", service_name, service_id)
                 
