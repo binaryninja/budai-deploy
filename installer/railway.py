@@ -515,15 +515,54 @@ class RailwayProvider:
         vars_payload = self.get_service_variables(proj_id, env_id, service_id)
 
         password = vars_payload.get("REDIS_PASSWORD")
-        host = vars_payload.get("RAILWAY_PRIVATE_DOMAIN")
-        port = vars_payload.get("REDIS_PORT", "6379")
+        host = (
+            vars_payload.get("RAILWAY_PRIVATE_DOMAIN")
+            or vars_payload.get("REDIS_HOST")
+            or vars_payload.get("REDISHOST")
+        )
+        port = (
+            vars_payload.get("REDIS_PORT")
+            or vars_payload.get("REDISPORT")
+            or "6379"
+        )
+        redis_user = (
+            vars_payload.get("REDISUSER")
+            or vars_payload.get("REDIS_USERNAME")
+            or "default"
+        )
 
         if not password or not host:
             raise RailwayAPIError(
                 f"Redis service {service_name} missing required connection variables"
             )
-
+        port = str(port)
         redis_url = f"redis://:{password}@{host}:{port}/0"
+
+        # Ensure all expected connection variables are present for Railway UI integrations
+        desired_vars = {
+            "REDIS_PASSWORD": password,
+            "REDIS_HOST": host,
+            "REDIS_PORT": port,
+            "REDIS_URL": redis_url,
+            "REDIS_USERNAME": redis_user,
+            "REDISHOST": host,
+            "REDISPORT": port,
+            "REDISPASSWORD": password,
+            "REDISUSER": redis_user,
+        }
+        to_update = {
+            key: value
+            for key, value in desired_vars.items()
+            if value and vars_payload.get(key) != value
+        }
+        if to_update:
+            self.set_environment_variables(
+                service_id=service_id,
+                environment=environment,
+                variables=to_update,
+                project_id=proj_id,
+            )
+            vars_payload.update(to_update)
 
         return {
             "service_id": service_id,
