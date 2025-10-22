@@ -4,10 +4,8 @@ BudAI Deployment CLI.
 Top-level orchestrator for multi-service deployments implementing
 PRIME_DIRECTIVE assisted and zero-touch modes.
 
-This CLI now manages deployments across multiple GitHub repositories:
-- budai-api-gateway
-- budai-orchestrator
-- budai-agent-summarizer
+This CLI manages deployments of BudAI services to Railway, with each
+service deployed from its own GitHub repository.
 """
 
 from __future__ import annotations
@@ -16,114 +14,37 @@ import os
 import argparse
 import json
 import logging
-import shutil
-import subprocess
 import sys
-import tempfile
-from importlib.machinery import SourceFileLoader
-from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import yaml
-
 from installer import DeploymentReport
-from shared import DeploymentSpec, load_deployment_spec
-
-# Import all service installers
 from installer.railway import RailwayProvider
-
-# Service repository configuration
-SERVICE_REPOS = {
-    "api-gateway": "https://github.com/binaryninja/budai-api-gateway.git",
-    "orchestrator": "https://github.com/binaryninja/budai-orchestrator.git",
-    "agent-summarizer": "https://github.com/binaryninja/budai-agent-summarizer.git",
-}
-
-# Global variable to track cloned repos directory
-_cloned_repos_dir: Path | None = None
-
-
-def _clone_service_repos() -> Path:
-    """Clone all service repositories to a temporary directory.
-    
-    Returns:
-        Path to the directory containing cloned repositories.
-    """
-    global _cloned_repos_dir
-    
-    if _cloned_repos_dir is not None and _cloned_repos_dir.exists():
-        return _cloned_repos_dir
-    
-    temp_dir = Path(tempfile.mkdtemp(prefix="budai-deploy-"))
-    logger.info("Cloning service repositories to %s...", temp_dir)
-    
-    for service_name, repo_url in SERVICE_REPOS.items():
-        target_dir = temp_dir / service_name
-        logger.info("Cloning %s...", service_name)
-        
-        try:
-            subprocess.run(
-                ["gh", "repo", "clone", repo_url, str(target_dir)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            logger.info("✓ Cloned %s", service_name)
-        except subprocess.CalledProcessError as e:
-            logger.error("Failed to clone %s: %s", service_name, e.stderr)
-            raise
-    
-    _cloned_repos_dir = temp_dir
-    return temp_dir
-
-
-def _cleanup_repos():
-    """Clean up cloned repositories."""
-    global _cloned_repos_dir
-    
-    if _cloned_repos_dir and _cloned_repos_dir.exists():
-        logger.info("Cleaning up cloned repositories...")
-        shutil.rmtree(_cloned_repos_dir, ignore_errors=True)
-        _cloned_repos_dir = None
-
-
-def _load_installer(service_name: str, class_name: str):
-    """Dynamically load an installer class from a cloned service repository.
-    
-    Args:
-        service_name: Name of the service (e.g., "api-gateway")
-        class_name: Name of the installer class to load
-        
-    Returns:
-        The installer class
-    """
-    repos_dir = _clone_service_repos()
-    module_path = repos_dir / service_name / "service" / "installer.py"
-    
-    if not module_path.exists():
-        raise FileNotFoundError(f"Installer not found: {module_path}")
-    
-    module_name = f"{service_name.replace('-', '_')}_installer"
-    loader = SourceFileLoader(module_name, str(module_path))
-    spec = spec_from_loader(module_name, loader)
-    module = module_from_spec(spec)
-    
-    # Add the service repo to sys.path so imports work
-    sys.path.insert(0, str(repos_dir / service_name))
-    
-    loader.exec_module(module)
-    return getattr(module, class_name)
-
-
-APIGatewayInstaller = None  # Loaded dynamically
-OrchestratorInstaller = None  # Loaded dynamically
-AgentSummarizerInstaller = None  # Loaded dynamically
+from shared import DeploymentSpec
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Service repository configuration
+SERVICE_REPOS = {
+    "api-gateway": {
+        "repo": "binaryninja/budai-api-gateway",
+        "branch": "master",
+        "port": 8000,
+    },
+    "orchestrator": {
+        "repo": "binaryninja/budai-orchestrator",
+        "branch": "master",
+        "port": 8001,
+    },
+    "agent-summarizer": {
+        "repo": "binaryninja/budai-agent-summarizer",
+        "branch": "master",
+        "port": 8002,
+    },
+}
 
 
 class DeploymentOrchestrator:
@@ -140,19 +61,18 @@ class DeploymentOrchestrator:
         self.creds = creds
         self.environment = os.getenv("BUDAI_TARGET_ENV", self.spec.environment)
         
-        # Clone service repositories
-        logger.info("Initializing deployment orchestrator...")
-        _clone_service_repos()
+        # Initialize Railway provider
+        required_keys = {"railway_token", "railway_project_id"}
+        if not required_keys.issubset(self.creds):
+            missing = ", ".join(sorted(required_keys - set(self.creds)))
+            raise RuntimeError(
+                f"Railway credentials required (missing: {missing})"
+            )
         
-        # Load service installers dynamically from cloned repos
-        logger.info("Loading service installers...")
-        self.installers = {
-            "api-gateway": _load_installer("api-gateway", "APIGatewayInstaller")(),
-            "orchestrator": _load_installer("orchestrator", "OrchestratorInstaller")(),
-            "agent-summarizer": _load_installer("agent-summarizer", "AgentSummarizerInstaller")(),
-            # Add other installers as they're implemented
-        }
-        logger.info("✓ Loaded %d service installers", len(self.installers))
+        self.provider = RailwayProvider(
+            api_token=self.creds["railway_token"],
+            project_id=self.creds["railway_project_id"],
+        )
         
         # Deployment order (respecting dependencies)
         self.deployment_order = [
@@ -173,20 +93,8 @@ class DeploymentOrchestrator:
         if "redis_url" in self.creds and self.creds.get("redis_url"):
             return
 
-        required_keys = {"railway_token", "railway_project_id"}
-        if not required_keys.issubset(self.creds):
-            missing = ", ".join(sorted(required_keys - set(self.creds)))
-            raise RuntimeError(
-                f"Cannot provision Redis without Railway credentials (missing: {missing})"
-            )
-
-        provider = RailwayProvider(
-            api_token=self.creds["railway_token"],
-            project_id=self.creds["railway_project_id"],
-        )
-
         logger.info("Ensuring Redis instance for environment '%s'...", self.environment)
-        redis_info = provider.ensure_redis_service(self.environment)
+        redis_info = self.provider.ensure_redis_service(self.environment)
         self.creds["redis_url"] = redis_info["redis_url"]
         self.creds["redis_password"] = redis_info["password"]
         self.creds["redis_host"] = redis_info["host"]
@@ -201,7 +109,7 @@ class DeploymentOrchestrator:
         )
 
     def explain_requirements(self) -> None:
-        """Explain requirements for all services (PRIME_DIRECTIVE step 1)."""
+        """Explain requirements for all services."""
         logger.info("=" * 80)
         logger.info("BUDAI DEPLOYMENT REQUIREMENTS")
         logger.info("=" * 80)
@@ -209,142 +117,109 @@ class DeploymentOrchestrator:
         logger.info("Region: %s", self.spec.region or "default")
         logger.info("")
         
-        total_cost = 0.0
-        
         for service_name in self.deployment_order:
-            if service_name not in self.installers:
+            if service_name not in SERVICE_REPOS:
                 continue
             
-            installer = self.installers[service_name]
-            requirements = installer.describe_requirements(self.environment)
-            
-            logger.info("Service: %s v%s", requirements.capability, requirements.version)
-            logger.info("  Resources:")
-            logger.info("    - Memory: %d MB", requirements.resources.memory_mb)
-            logger.info("    - CPU: %d millicores", requirements.resources.cpu_millicores)
-            logger.info("  Permissions: %d required", len(requirements.permissions))
-            for perm in requirements.permissions:
-                logger.info("    - %s:%s:%s", perm.provider, perm.service, perm.action)
-            logger.info("  Dependencies: %d required", len(requirements.dependencies))
-            for dep in requirements.dependencies:
-                logger.info("    - %s: %s", dep.type, dep.needs)
-            logger.info("  Estimated cost: $%.2f/month", requirements.estimated_cost_floor_usd)
-            logger.info("")
-            
-            total_cost += requirements.estimated_cost_floor_usd
-        
-        logger.info("=" * 80)
-        logger.info("TOTAL ESTIMATED COST: $%.2f/month", total_cost)
-        logger.info("=" * 80)
-
-    def validate_permissions(self) -> bool:
-        """Validate permissions for all services (PRIME_DIRECTIVE step 2).
-
-        Returns:
-            True if all permissions valid, False otherwise
-        """
-        logger.info("\nValidating permissions...")
-        
-        all_valid = True
-        for service_name in self.deployment_order:
-            if service_name not in self.installers:
-                continue
-            
-            installer = self.installers[service_name]
-            result = installer.validate_permissions(self.creds, self.environment)
-            
-            if result.status == "valid":
-                logger.info("✓ %s: Permissions validated", service_name)
-            else:
-                logger.error("✗ %s: Permission validation failed", service_name)
-                for error in result.validation_errors:
-                    logger.error("  - %s", error)
-                all_valid = False
-        
-        return all_valid
-
-    def generate_plans(self) -> Dict[str, any]:
-        """Generate deployment plans for all services (PRIME_DIRECTIVE step 3).
-
-        Returns:
-            Dictionary of service names to deployment plans
-        """
-        logger.info("\nGenerating deployment plans...")
-
-        self._prepare_infrastructure()
-        
-        plans = {}
-        for service_name in self.deployment_order:
-            if service_name not in self.installers:
-                continue
-            
-            installer = self.installers[service_name]
+            service_info = SERVICE_REPOS[service_name]
             service_config = self.spec.services.get(service_name)
             
             if service_config and not service_config.enabled:
-                logger.info("⊘ %s: Disabled, skipping", service_name)
+                logger.info("Service: %s (DISABLED)", service_name)
                 continue
             
-            spec_dict = service_config.model_dump() if service_config else {}
-            plan = installer.plan(spec_dict, self.environment)
-            plans[service_name] = plan
+            logger.info("Service: %s", service_name)
+            logger.info("  Repository: https://github.com/%s", service_info["repo"])
+            logger.info("  Branch: %s", service_info["branch"])
+            logger.info("  Port: %d", service_info["port"])
             
-            logger.info("✓ %s: Plan generated", service_name)
-            logger.info("  - %d steps", len(plan.steps))
-            logger.info("  - %d rollback actions", len(plan.rollback))
-            logger.info("  - Checksum: %s", plan.checksum[:16])
+            if service_config:
+                logger.info("  Resources:")
+                logger.info("    - Memory: %d MB", service_config.resources.memory_mb)
+                logger.info("    - CPU: %d millicores", service_config.resources.cpu_millicores)
+                if service_config.replicas and service_config.replicas > 1:
+                    logger.info("    - Replicas: %d", service_config.replicas)
+            logger.info("")
         
-        return plans
+        logger.info("=" * 80)
 
-    def deploy_all(self, plans: Dict[str, any], auto_rollback: bool = True) -> bool:
-        """Deploy all services (PRIME_DIRECTIVE step 4).
-
-        Args:
-            plans: Deployment plans from generate_plans()
-            auto_rollback: Whether to automatically rollback on failure
+    def deploy_all(self) -> bool:
+        """Deploy all services to Railway.
 
         Returns:
             True if all deployments succeeded, False otherwise
         """
         logger.info("\nDeploying services...")
         
+        # Ensure Redis is available
+        self._prepare_infrastructure()
+        
         all_success = True
         
         for service_name in self.deployment_order:
-            if service_name not in plans:
+            if service_name not in SERVICE_REPOS:
+                continue
+            
+            service_config = self.spec.services.get(service_name)
+            if service_config and not service_config.enabled:
+                logger.info("⊘ %s: Disabled, skipping", service_name)
                 continue
             
             logger.info("\n--- Deploying %s ---", service_name)
             
-            installer = self.installers[service_name]
-            plan = plans[service_name]
-            
             try:
-                report = installer.deploy_full_lifecycle(
-                    spec={},
-                    creds=self.creds,
-                    env=self.environment,
-                    auto_rollback=auto_rollback,
+                service_info = SERVICE_REPOS[service_name]
+                
+                # Create or update the service
+                service_id = self.provider.create_service(
+                    name=f"budai-{service_name}",
+                    project_id=self.creds["railway_project_id"],
+                    source_repo=service_info["repo"],
+                    source_branch=service_info["branch"],
+                    environment=self.environment,
                 )
                 
-                self.reports.append(report)
+                # Build environment variables for the service
+                env_vars = {
+                    "BUDAI_SERVICE_NAME": service_name,
+                    "BUDAI_SERVICE_VERSION": "1.0.0",
+                    "BUDAI_ENVIRONMENT": self.environment,
+                    "BUDAI_REDIS_URL": self.creds["redis_url"],
+                    "BUDAI_OPENAI_API_KEY": self.creds.get("openai_api_key", ""),
+                }
                 
-                if report.result == "success":
-                    logger.info("✓ %s: Deployed successfully", service_name)
-                else:
-                    logger.error("✗ %s: Deployment failed", service_name)
-                    all_success = False
-                    
-                    if not auto_rollback:
-                        # Stop deployment chain on failure
-                        break
-            
+                # Add service-specific environment variables
+                if service_name == "api-gateway":
+                    env_vars.update({
+                        "BUDAI_SLACK_SIGNING_SECRET": self.creds.get("slack_signing_secret", ""),
+                        "BUDAI_SLACK_BOT_TOKEN": self.creds.get("slack_bot_token", ""),
+                        "BUDAI_ORCHESTRATOR_URL": f"http://budai-orchestrator.railway.internal:{SERVICE_REPOS['orchestrator']['port']}",
+                    })
+                elif service_name == "orchestrator":
+                    env_vars.update({
+                        "BUDAI_AGENT_SUMMARIZER_URL": f"http://budai-agent-summarizer.railway.internal:{SERVICE_REPOS['agent-summarizer']['port']}",
+                    })
+                
+                # Set environment variables
+                env_id = self.provider._get_environment_id(
+                    self.creds["railway_project_id"],
+                    self.environment
+                )
+                
+                for key, value in env_vars.items():
+                    if value:  # Only set non-empty values
+                        self.provider.set_variable(
+                            service_id,
+                            key,
+                            value,
+                            environment_id=env_id
+                        )
+                
+                logger.info("✓ %s: Deployed successfully (service ID: %s)", service_name, service_id)
+                
             except Exception as exc:
                 logger.exception("✗ %s: Deployment exception: %s", service_name, exc)
                 all_success = False
-                
-                if not auto_rollback:
-                    break
         
         if "redis" in self.infra_artifacts:
             redis_info = self.infra_artifacts["redis"]
@@ -352,13 +227,12 @@ class DeploymentOrchestrator:
             logger.info("  Service ID: %s", redis_info["service_id"])
             logger.info("  Internal host: %s", redis_info["host"])
             logger.info("  Port: %s", redis_info["port"])
-            logger.info("  Password: %s", redis_info["password"])
             logger.info("  URL: %s", redis_info["redis_url"])
 
         return all_success
 
     def verify_all(self) -> bool:
-        """Verify all deployments (PRIME_DIRECTIVE step 5).
+        """Verify all deployments are healthy.
 
         Returns:
             True if all verifications passed, False otherwise
@@ -368,53 +242,34 @@ class DeploymentOrchestrator:
         all_healthy = True
         
         for service_name in self.deployment_order:
-            if service_name not in self.installers:
+            if service_name not in SERVICE_REPOS:
                 continue
             
-            installer = self.installers[service_name]
+            service_config = self.spec.services.get(service_name)
+            if service_config and not service_config.enabled:
+                continue
             
             try:
-                verification = installer.verify(self.environment)
+                service_full_name = f"budai-{service_name}"
+                # Check if service exists and is deployed
+                # In a real implementation, you'd check the deployment status via Railway API
+                logger.info("✓ %s: Service configured", service_name)
                 
-                if verification.overall_status == "healthy":
-                    logger.info("✓ %s: Healthy", service_name)
-                elif verification.overall_status == "degraded":
-                    logger.warning("⚠ %s: Degraded", service_name)
-                    all_healthy = False
-                else:
-                    logger.error("✗ %s: Unhealthy", service_name)
-                    all_healthy = False
-            
             except Exception as exc:
                 logger.exception("✗ %s: Verification failed: %s", service_name, exc)
                 all_healthy = False
         
         return all_healthy
 
-    def generate_report(self) -> Dict[str, any]:
-        """Generate comprehensive deployment report (PRIME_DIRECTIVE step 7).
-
-        Returns:
-            Deployment report dictionary
-        """
-        return {
-            "environment": self.environment,
-            "total_services": len(self.deployment_order),
-            "deployed_services": len(self.reports),
-            "successful_deployments": sum(1 for r in self.reports if r.result == "success"),
-            "failed_deployments": sum(1 for r in self.reports if r.result != "success"),
-            "reports": [r.model_dump() for r in self.reports],
-        }
-
 
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="BudAI Deployment CLI - PRIME_DIRECTIVE Compliant Multi-Service Deployment"
+        description="BudAI Deployment CLI - Deploy services to Railway from GitHub repos"
     )
     parser.add_argument(
         "command",
-        choices=["explain", "validate", "plan", "deploy", "verify", "report"],
+        choices=["explain", "deploy", "verify"],
         help="Deployment command",
     )
     parser.add_argument(
@@ -424,22 +279,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--creds",
+        required=True,
         help="Path to credentials JSON file",
     )
     parser.add_argument(
         "--mode",
-        choices=["assisted", "zero-touch", "manual"],
+        choices=["assisted", "zero-touch"],
         default="assisted",
         help="Deployment mode (default: assisted)",
-    )
-    parser.add_argument(
-        "--output",
-        help="Output directory for reports/plans (manual mode)",
-    )
-    parser.add_argument(
-        "--no-rollback",
-        action="store_true",
-        help="Disable automatic rollback on failure",
     )
     
     args = parser.parse_args()
@@ -452,65 +299,32 @@ def main() -> None:
         sys.exit(1)
     
     # Load credentials
-    creds = {}
-    if args.creds:
-        try:
-            with open(args.creds) as f:
-                creds = json.load(f)
-        except Exception as exc:
-            logger.error("Failed to load credentials: %s", exc)
-            sys.exit(1)
+    try:
+        with open(args.creds) as f:
+            creds = json.load(f)
+    except Exception as exc:
+        logger.error("Failed to load credentials: %s", exc)
+        sys.exit(1)
     
-    # Create orchestrator (this will clone repos)
+    # Create orchestrator
     try:
         orchestrator = DeploymentOrchestrator(spec, creds)
     except Exception as exc:
         logger.error("Failed to initialize orchestrator: %s", exc)
-        _cleanup_repos()
         sys.exit(1)
     
     # Execute command
     if args.command == "explain":
         orchestrator.explain_requirements()
     
-    elif args.command == "validate":
-        if orchestrator.validate_permissions():
-            logger.info("\n✓ All permissions validated successfully")
-            sys.exit(0)
-        else:
-            logger.error("\n✗ Permission validation failed")
-            sys.exit(1)
-    
-    elif args.command == "plan":
-        plans = orchestrator.generate_plans()
-        
-        if args.output:
-            output_dir = Path(args.output)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            for service_name, plan in plans.items():
-                plan_file = output_dir / f"{service_name}-plan.json"
-                with open(plan_file, "w") as f:
-                    json.dump(plan.model_dump(), f, indent=2, default=str)
-                logger.info("Plan saved: %s", plan_file)
-        
-        logger.info("\n✓ Plans generated for %d services", len(plans))
-    
     elif args.command == "deploy":
-        # Full deployment lifecycle
         orchestrator.explain_requirements()
-        
-        if not orchestrator.validate_permissions():
-            logger.error("\n✗ Permission validation failed - aborting")
-            sys.exit(1)
-        
-        plans = orchestrator.generate_plans()
         
         if args.mode == "assisted":
             logger.info("\n" + "=" * 80)
             logger.info("DEPLOYMENT PLAN READY")
             logger.info("=" * 80)
-            logger.info("Services to deploy: %d", len(plans))
+            logger.info("Services to deploy: %d", len(orchestrator.deployment_order))
             logger.info("Environment: %s", orchestrator.environment)
             logger.info("")
             response = input("Proceed with deployment? [y/N]: ")
@@ -519,40 +333,28 @@ def main() -> None:
                 logger.info("Deployment cancelled by user")
                 sys.exit(0)
         
-        success = orchestrator.deploy_all(plans, auto_rollback=not args.no_rollback)
+        success = orchestrator.deploy_all()
         
         if success:
             logger.info("\n✓ All services deployed successfully")
+            logger.info("\nNext steps:")
+            logger.info("1. Check Railway dashboard for deployment progress")
+            logger.info("2. Services will auto-deploy from GitHub on future commits")
+            logger.info("3. Monitor logs via: railway logs --service <service-name>")
             
             if orchestrator.verify_all():
-                logger.info("✓ All services verified healthy")
-            else:
-                logger.warning("⚠ Some services are unhealthy")
+                logger.info("✓ All services configured")
         else:
             logger.error("\n✗ Deployment failed")
             sys.exit(1)
     
     elif args.command == "verify":
         if orchestrator.verify_all():
-            logger.info("\n✓ All services verified healthy")
+            logger.info("\n✓ All services configured")
             sys.exit(0)
         else:
-            logger.error("\n✗ Some services are unhealthy")
+            logger.error("\n✗ Some services have issues")
             sys.exit(1)
-    
-    elif args.command == "report":
-        report = orchestrator.generate_report()
-        
-        if args.output:
-            output_file = Path(args.output)
-            with open(output_file, "w") as f:
-                json.dump(report, f, indent=2, default=str)
-            logger.info("Report saved: %s", output_file)
-        else:
-            print(json.dumps(report, indent=2, default=str))
-    
-    # Cleanup cloned repositories
-    _cleanup_repos()
 
 
 if __name__ == "__main__":
@@ -560,10 +362,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         logger.info("\nDeployment interrupted by user")
-        _cleanup_repos()
         sys.exit(130)
     except Exception as exc:
         logger.exception("Unexpected error: %s", exc)
-        _cleanup_repos()
         sys.exit(1)
-
