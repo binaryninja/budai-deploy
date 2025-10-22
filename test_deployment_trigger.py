@@ -54,39 +54,16 @@ env_id = provider._get_environment_id(creds["railway_project_id"], environment)
 print(f"Environment ID: {env_id}")
 print()
 
-# Get FULL service details
-print("Fetching complete service details...")
+# Get service details in steps (some queries fail for new services)
+print("Fetching service details (basic)...")
 query = """
-query GetServiceDetails($serviceId: String!) {
+query GetServiceBasic($serviceId: String!) {
     service(id: $serviceId) {
         id
         name
-        icon
         source {
             repo
             image
-        }
-        serviceInstances(first: 5) {
-            edges {
-                node {
-                    id
-                    environmentId
-                    source {
-                        repo
-                        image
-                    }
-                    latestDeployment {
-                        id
-                        status
-                        createdAt
-                    }
-                    domains {
-                        serviceDomains {
-                            domain
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -96,7 +73,14 @@ try:
     result = provider._graphql_query(query, {"serviceId": service_id})
     service_data = result.get("service", {})
     
-    print(f"Service Name: {service_data.get('name')}")
+    if not service_data:
+        print("✗ Service not found or query failed")
+        print("The service might have been deleted or is in an invalid state.")
+        print()
+        print("RECOMMENDATION: Delete this service and recreate it.")
+        sys.exit(1)
+    
+    print(f"✓ Service Name: {service_data.get('name')}")
     
     # Check source
     source = service_data.get("source")
@@ -109,79 +93,45 @@ try:
     
     print()
     
-    # Check instances
-    instances = service_data.get("serviceInstances", {}).get("edges", [])
-    print(f"Service Instances: {len(instances)}")
-    
-    target_instance = None
-    for edge in instances:
-        node = edge.get("node", {})
-        inst_env_id = node.get("environmentId")
-        inst_id = node.get("id")
-        
-        print(f"\n  Instance {inst_id}:")
-        print(f"    Environment ID: {inst_env_id}")
-        
-        # Check instance-level source
-        inst_source = node.get("source")
-        if inst_source:
-            print(f"    Instance Source:")
-            print(f"      Repo: {inst_source.get('repo', 'None')}")
-            print(f"      Image: {inst_source.get('image', 'None')}")
-        else:
-            print(f"    Instance Source: None ⚠️")
-        
-        # Check deployments
-        latest_dep = node.get("latestDeployment")
-        if latest_dep:
-            print(f"    Latest Deployment: {latest_dep['id']}")
-            print(f"      Status: {latest_dep.get('status')}")
-        else:
-            print(f"    Latest Deployment: None (no deployments yet)")
-        
-        if inst_env_id == env_id:
-            target_instance = node
-    
-    if not target_instance:
-        print(f"\n✗ No service instance found for environment '{environment}'")
-        sys.exit(1)
-    
+except Exception as e:
+    print(f"✗ Failed to query basic service details: {e}")
     print()
-    print("=" * 80)
-    print("DIAGNOSIS")
-    print("=" * 80)
+    print("This service appears to be in a corrupted state.")
+    print("RECOMMENDATION: Delete and recreate the service.")
+    sys.exit(1)
+
+# Now try to get service instances separately
+print("Fetching service instances...")
+try:
+    instance = provider._get_service_instance(service_id, env_id)
     
-    # Check what might be wrong
-    inst_source = target_instance.get("source")
-    has_repo = inst_source and inst_source.get("repo")
-    has_image = inst_source and inst_source.get("image")
-    
-    if not has_repo and not has_image:
-        print("⚠️  ISSUE FOUND: Service instance has NO source configured!")
+    if not instance:
+        print("✗ No service instance found for this environment")
         print()
-        print("The service instance exists but doesn't have a repo or image attached.")
-        print("This is why deployments fail with 'Problem processing request'.")
+        print("This is normal for newly created services.")
+        print("Railway creates service instances asynchronously.")
         print()
-        print("Solution: Manually click 'Deploy' in Railway UI once, or ensure")
-        print("the service was created with a valid source_repo parameter.")
-        print()
-        print("Since your services were created via API with source_repo,")
-        print("Railway might need time to initialize the connection.")
-        print()
-        print("Try waiting 10-30 seconds and running this script again.")
-    elif not target_instance.get("latestDeployment"):
-        print("✓ Service instance has source configured")
-        print("  But no deployments have been triggered yet.")
-        print()
-        print("This suggests Railway is waiting for you to manually trigger")
-        print("the first deployment via the UI, or it's still initializing.")
-        print()
-        print("RECOMMENDATION: Just let Railway auto-deploy when ready.")
-        print("The service will deploy automatically when Railway finishes")
-        print("connecting to the GitHub repository.")
+        print("RECOMMENDATION: Wait 10-30 seconds for Railway to initialize,")
+        print("then the service will auto-deploy when ready.")
+    else:
+        print(f"✓ Service Instance found: {instance['id']}")
+        
+        deployment = instance.get("latestDeployment")
+        if deployment:
+            print(f"  Latest Deployment: {deployment['id']}")
+            print(f"  Status: {deployment.get('status')}")
+        else:
+            print(f"  Latest Deployment: None")
+            print()
+            print("  The service instance exists but has no deployments yet.")
+            print("  This means Railway has initialized the instance but hasn't")
+            print("  triggered the first deployment.")
+            print()
+            print("  NEXT STEP: The new serviceConnect() call in deploy.py")
+            print("  should trigger the first deployment automatically.")
     
 except Exception as e:
-    print(f"✗ Failed to query service: {e}")
+    print(f"✗ Failed to query service instances: {e}")
     import traceback
     traceback.print_exc()
 
