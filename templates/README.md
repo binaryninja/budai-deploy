@@ -65,13 +65,32 @@ git push
 - **restartPolicyType**: How to handle crashes (ON_FAILURE, ALWAYS, NEVER)
 - **restartPolicyMaxRetries**: Maximum restart attempts before marking as failed
 
-## What This Doesn't Include
+## Environment Variables Strategy
 
-The `railway.json` file **does not include environment variables** for security reasons. Environment variables are still set via:
+The `railway.json` file **does not include environment variables** for security reasons. Instead, we use a hybrid approach:
 
-1. The Railway dashboard UI
-2. The Railway API (via our deployment scripts)
+### Static Variables (Set Once)
+Variables that never change for a service are set **once** during initial service creation:
+- Service name and version
+- Internal service URLs (Railway private networking)
+- Default configuration values
+
+These are defined in `.env.example` files in each repo for documentation.
+
+### Dynamic Variables (Set Per Deployment)
+Variables that change between environments or deployments are set via:
+1. The Railway API (via our deployment scripts)
+2. The Railway dashboard UI
 3. The Railway CLI
+
+Examples: API keys, secrets, environment name, Redis URL
+
+### Why This Matters
+**⚠️ Important:** Each time you set/change an environment variable via the Railway API, it triggers a new deployment. By separating static and dynamic variables, we:
+
+1. **Reduce deployment time** - Only update variables that actually changed
+2. **Minimize build queue** - Avoid triggering 6-8 sequential deployments
+3. **Improve reliability** - Fewer deployments = fewer chances for failure
 
 ## Benefits of This Approach
 

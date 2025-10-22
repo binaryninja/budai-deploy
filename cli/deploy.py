@@ -186,39 +186,82 @@ class DeploymentOrchestrator:
             try:
                 service_info = SERVICE_REPOS[service_name]
                 
-                # Create or update the service connected to GitHub repo
+                # Check if service already exists
+                existing_service = self.provider._get_service_by_name(
+                    f"budai-{service_name}",
+                    self.creds["railway_project_id"]
+                )
+                is_new_service = existing_service is None
+                
+                # Prepare static variables for initial service creation only
+                static_vars = {
+                    "BUDAI_SERVICE_NAME": service_name,
+                    "BUDAI_SERVICE_VERSION": "1.0.0",
+                }
+                
+                # Add service-specific static variables (internal URLs)
+                if service_name == "api-gateway":
+                    static_vars.update({
+                        "BUDAI_ORCHESTRATOR_URL": f"http://budai-orchestrator.railway.internal:{SERVICE_REPOS['orchestrator']['port']}",
+                    })
+                elif service_name == "orchestrator":
+                    static_vars.update({
+                        "BUDAI_AGENT_SUMMARIZER_URL": f"http://budai-agent-summarizer.railway.internal:{SERVICE_REPOS['agent-summarizer']['port']}",
+                    })
+                
+                # Create or get the service connected to GitHub repo
                 # Railway will automatically read railway.json from the repo for build/deploy config
+                # For new services, pass static variables to avoid triggering multiple deployments
                 service_id = self.provider.create_service(
                     name=f"budai-{service_name}",
                     project_id=self.creds["railway_project_id"],
                     source_repo=service_info["repo"],
                     source_branch=service_info["branch"],
                     environment=self.environment,
+                    variables=static_vars if is_new_service else None,
                 )
                 
-                # Build environment variables for the service
-                env_vars = {
-                    "BUDAI_SERVICE_NAME": service_name,
-                    "BUDAI_SERVICE_VERSION": "1.0.0",
+                # Build ONLY dynamic environment variables (these change between deployments)
+                # Static variables are set once during service creation above
+                dynamic_vars = {
                     "BUDAI_ENVIRONMENT": self.environment,
                     "BUDAI_REDIS_URL": self.creds["redis_url"],
                     "BUDAI_OPENAI_API_KEY": self.creds.get("openai_api_key", ""),
                 }
                 
-                # Add service-specific environment variables
+                # Add service-specific dynamic variables (secrets)
                 if service_name == "api-gateway":
-                    env_vars.update({
+                    dynamic_vars.update({
                         "BUDAI_SLACK_SIGNING_SECRET": self.creds.get("slack_signing_secret", ""),
                         "BUDAI_SLACK_BOT_TOKEN": self.creds.get("slack_bot_token", ""),
-                        "BUDAI_ORCHESTRATOR_URL": f"http://budai-orchestrator.railway.internal:{SERVICE_REPOS['orchestrator']['port']}",
-                    })
-                elif service_name == "orchestrator":
-                    env_vars.update({
-                        "BUDAI_AGENT_SUMMARIZER_URL": f"http://budai-agent-summarizer.railway.internal:{SERVICE_REPOS['agent-summarizer']['port']}",
                     })
                 
-                # Set environment variables (filter out empty values)
-                non_empty_vars = {k: v for k, v in env_vars.items() if v}
+                # Filter out empty values
+                non_empty_vars = {k: v for k, v in dynamic_vars.items() if v}
+                
+                # For existing services, check which variables have actually changed
+                # to minimize unnecessary deployments
+                if not is_new_service and non_empty_vars:
+                    env_id = self.provider._get_environment_id(
+                        self.creds["railway_project_id"],
+                        self.environment
+                    )
+                    existing_vars = self.provider.get_service_variables(
+                        self.creds["railway_project_id"],
+                        env_id,
+                        service_id
+                    )
+                    # Only update variables that have changed
+                    non_empty_vars = {
+                        k: v for k, v in non_empty_vars.items()
+                        if k not in existing_vars or existing_vars[k] != v
+                    }
+                    if non_empty_vars:
+                        logger.info("Updating %d changed variable(s): %s", 
+                                  len(non_empty_vars), ", ".join(non_empty_vars.keys()))
+                
+                # Set dynamic environment variables
+                # Note: Each variable triggers a separate deployment due to Railway API limitations
                 if non_empty_vars:
                     self.provider.set_environment_variables(
                         service_id=service_id,
