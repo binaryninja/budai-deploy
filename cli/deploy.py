@@ -253,7 +253,8 @@ class DeploymentOrchestrator:
                     self.provider._connect_service_repo(
                         service_id=service_id,
                         repo=service_info["repo"],
-                        branch=service_info["branch"]
+                        branch=service_info["branch"],
+                        environment=self.environment,
                     )
                     logger.info("Service connected to GitHub repo and branch")
                 

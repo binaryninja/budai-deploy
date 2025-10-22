@@ -385,6 +385,8 @@ class RailwayProvider:
         repo: str,
         branch: Optional[str] = None,
         image: Optional[str] = None,
+        *,
+        environment: Optional[str] = None,
     ) -> None:
         """Associate a Git repository (or container image) with a service."""
         query = """
@@ -399,14 +401,67 @@ class RailwayProvider:
             input_payload["branch"] = branch
         if image:
             input_payload["image"] = image
+        env_id: Optional[str] = None
+        poll_interval = int(os.getenv("RAILWAY_SERVICE_CONNECT_POLL_INTERVAL", "5"))
+        max_wait = int(os.getenv("RAILWAY_SERVICE_CONNECT_WAIT_SECONDS", "60"))
 
-        self._graphql_query(
-            query,
-            {
-                "serviceId": service_id,
-                "input": input_payload,
-            },
-        )
+        if environment:
+            project_id = self.project_id
+            if not project_id:
+                raise ValueError("Project ID required to resolve environment for serviceConnect.")
+
+            env_id = self._get_environment_id(project_id, environment)
+            deadline = time.time() + max(1, max_wait)
+
+            while time.time() < deadline:
+                instance = self._get_service_instance(service_id, env_id)
+                if instance:
+                    break
+                logger.debug(
+                    "Waiting for service instance before connecting repo (service=%s, environment=%s)",
+                    service_id,
+                    environment,
+                )
+                time.sleep(max(1, poll_interval))
+            else:
+                logger.warning(
+                    "Service instance not detected before serviceConnect (service=%s, environment=%s, wait=%ss)",
+                    service_id,
+                    environment,
+                    max_wait,
+                )
+
+        attempts = 0
+        max_attempts = 3 if env_id else 1
+        while attempts < max_attempts:
+            attempts += 1
+            try:
+                self._graphql_query(
+                    query,
+                    {
+                        "serviceId": service_id,
+                        "input": input_payload,
+                    },
+                )
+                return
+            except RailwayAPIError as exc:
+                message = str(exc)
+                if (
+                    env_id
+                    and "ServiceInstance not found" in message
+                    and attempts < max_attempts
+                ):
+                    logger.info(
+                        "Service instance not ready for serviceConnect (service=%s, environment=%s, attempt=%d/%d). Retrying in %ss.",
+                        service_id,
+                        environment,
+                        attempts,
+                        max_attempts,
+                        poll_interval,
+                    )
+                    time.sleep(max(1, poll_interval))
+                    continue
+                raise
 
     def _wait_for_service_instance(
         self,
