@@ -23,14 +23,12 @@ provider = RailwayProvider(
     project_id=creds["railway_project_id"]
 )
 
-# Test service details from the error log
-service_id = "7814bb95-b2db-426c-88b7-e23b7c7dc3fa"
 environment = "development"
 
 print("=" * 80)
 print("TESTING DEPLOYMENT TRIGGERS")
 print("=" * 80)
-print(f"Service ID: {service_id}")
+print(f"Project ID: {creds['railway_project_id']}")
 print(f"Environment: {environment}")
 print()
 
@@ -39,92 +37,97 @@ env_id = provider._get_environment_id(creds["railway_project_id"], environment)
 print(f"Environment ID: {env_id}")
 print()
 
-# Check service details
-print("Querying service details...")
+# List all services in the project
+print("Listing all services in project...")
 try:
-    query = """
-    query GetService($serviceId: String!) {
-        service(id: $serviceId) {
-            id
-            name
-            source {
-                repo
-                image
-            }
-            serviceInstances(first: 5) {
-                edges {
-                    node {
-                        id
-                        environmentId
-                        latestDeployment {
-                            id
-                            status
-                            createdAt
-                        }
-                    }
-                }
-            }
-        }
-    }
-    """
-    result = provider._graphql_query(query, {"serviceId": service_id})
-    service = result.get("service", {})
-    source = service.get("source")
+    services = provider._list_services(creds["railway_project_id"])
+    print(f"✓ Found {len(services)} services")
+    print()
     
-    print(f"✓ Service name: {service.get('name')}")
-    if source:
-        print(f"  Source repo: {source.get('repo', 'None')}")
-        print(f"  Source image: {source.get('image', 'None')}")
+    for idx, service in enumerate(services, 1):
+        print(f"{idx}. {service.get('name', 'Unnamed')} (ID: {service.get('id')})")
     
-    instances = service.get("serviceInstances", {}).get("edges", [])
-    print(f"  Service instances: {len(instances)}")
+    if not services:
+        print("No services found. Create a service first using the deploy script.")
+        sys.exit(0)
     
-    if instances:
-        for edge in instances:
-            node = edge.get("node", {})
-            print(f"\n  Instance ID: {node['id']}")
-            print(f"    Environment ID: {node['environmentId']}")
-            deployment = node.get("latestDeployment")
-            if deployment:
-                print(f"    Latest deployment: {deployment['id']}")
-                print(f"    Status: {deployment.get('status')}")
-            else:
-                print(f"    Latest deployment: None")
-    else:
-        print("  ⚠️  No service instances exist yet!")
-        print("     Railway creates instances asynchronously after service creation.")
-        print("     This is why deploy_service fails with 'Problem processing request'")
+    # Use the first service for testing
+    test_service = services[0]
+    service_id = test_service['id']
+    service_name = test_service.get('name', 'unknown')
+    
+    print()
+    print(f"Testing with service: {service_name} ({service_id})")
+    print()
     
 except Exception as e:
-    print(f"✗ Failed to query service: {e}")
+    print(f"✗ Failed to list services: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+
+# Check service instance details
+print("Checking for service instances...")
+try:
+    instance = provider._get_service_instance(service_id, env_id)
+    if instance:
+        print(f"✓ Service instance found: {instance['id']}")
+        latest_deployment = instance.get("latestDeployment")
+        if latest_deployment:
+            print(f"  Latest deployment ID: {latest_deployment['id']}")
+            print(f"  Status: {latest_deployment.get('status', 'unknown')}")
+        else:
+            print("  ⚠️  No deployments yet")
+        print()
+        
+        # Try to trigger a deployment
+        print("Attempting to trigger deployment...")
+        try:
+            deployment_id = provider.deploy_service(
+                service_id=service_id,
+                environment=environment,
+                project_id=creds["railway_project_id"]
+            )
+            print(f"✓ SUCCESS! Deployment triggered: {deployment_id}")
+        except Exception as e:
+            print(f"✗ Failed to trigger deployment: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print("✗ No service instance found")
+        print()
+        print("This means:")
+        print("  - Service was just created and instance isn't ready yet")
+        print("  - Railway creates service instances asynchronously")
+        print("  - This is why deploy_service() fails with 'Problem processing request'")
+        print()
+        print("Solution: Don't trigger deployment for newly created services.")
+        print("Railway will auto-deploy when the service instance is ready.")
+    
+except Exception as e:
+    print(f"✗ Failed to check service instance: {e}")
     import traceback
     traceback.print_exc()
 
 print()
 print("=" * 80)
-print("SOLUTION")
+print("CONCLUSION")
 print("=" * 80)
 print("""
-The issue: serviceInstanceDeploy mutation requires a service instance to exist.
-For newly created services, the instance doesn't exist immediately.
+For newly created services:
+- Railway creates service instances ASYNCHRONOUSLY after service creation
+- The instance doesn't exist immediately
+- deploy_service() mutation requires an instance to exist
+- Attempting to deploy before instance exists = "Problem processing request"
 
-Options:
-1. Remove the automatic deployment trigger for new services
-   - Let Railway auto-deploy when it's ready
-   - Advantages: No errors, Railway handles it
-   - Disadvantages: No immediate feedback
+Best Practice:
+1. For NEW services: Skip deployment trigger
+   - Railway auto-deploys when instance is ready
+   - GitHub webhooks trigger deployments
+   
+2. For EXISTING services: Trigger deployment after variable changes
+   - Instance already exists
+   - deploy_service() works fine
 
-2. Wait for service instance to appear, then trigger deployment
-   - Poll until instance exists (with timeout)
-   - Then call deploy_service()
-   - Disadvantages: Adds complexity and wait time
-
-3. Use a webhook or GitHub push to trigger first deployment
-   - Configure GitHub repo to trigger Railway deploys
-   - Advantages: Standard Railway workflow
-   - Disadvantages: Requires GitHub repo to have commits
-
-RECOMMENDATION: Option 1 - Don't trigger deployment for new services.
-Railway will automatically deploy when the service instance is ready.
-Only trigger deployments for existing services when variables change.
+Update deploy.py to ONLY trigger deployments for existing services!
 """)
