@@ -524,66 +524,73 @@ class RailwayProvider:
 
         env_id = self._get_environment_id(proj_id, environment)
         service_name = f"budai-redis-{environment}"
+        default_port = "6379"
+        default_user = "default"
+        inferred_host = f"{service_name}.railway.internal"
 
         service = self._get_service_by_name(service_name, proj_id)
         created = False
+        seeded_password: Optional[str] = None
 
         if service:
             service_id = service["id"]
         else:
-            password = "".join(
+            seeded_password = "".join(
                 secrets.choice(string.ascii_letters + string.digits) for _ in range(password_length)
             )
-            variables = {
-                "REDIS_PASSWORD": password,
+            redis_url_guess = f"redis://:{seeded_password}@{inferred_host}:{default_port}/0"
+            initial_vars = {
                 "ALLOW_EMPTY_PASSWORD": "no",
+                "REDIS_PASSWORD": seeded_password,
+                "REDIS_HOST": inferred_host,
+                "REDIS_PORT": default_port,
+                "REDIS_URL": redis_url_guess,
+                "REDIS_USERNAME": default_user,
+                "REDISHOST": inferred_host,
+                "REDISPORT": default_port,
+                "REDISPASSWORD": seeded_password,
+                "REDISUSER": default_user,
             }
+            logger.info(
+                "Creating Redis service %s with %d variables",
+                service_name,
+                len(initial_vars),
+            )
             service_id = self.create_service(
                 name=service_name,
                 project_id=proj_id,
                 environment_id=env_id,
                 source_image="railwayapp/redis:8.2",
-                variables=variables,
+                variables=initial_vars,
             )
             created = True
 
         if created:
             self._wait_for_service_instance(service_id, env_id)
-        else:
-            # Ensure redis has required variables; if missing, set them and redeploy
-            existing_vars = self.get_service_variables(proj_id, env_id, service_id)
-            if "REDIS_PASSWORD" not in existing_vars:
-                password = "".join(
-                    secrets.choice(string.ascii_letters + string.digits) for _ in range(password_length)
-                )
-                self.set_environment_variables(
-                    service_id=service_id,
-                    environment=environment,
-                    variables={
-                        "REDIS_PASSWORD": password,
-                        "ALLOW_EMPTY_PASSWORD": "no",
-                    },
-                    project_id=proj_id,
-                )
-                self._wait_for_service_instance(service_id, env_id)
 
         vars_payload = self.get_service_variables(proj_id, env_id, service_id)
 
-        password = vars_payload.get("REDIS_PASSWORD")
+        password = vars_payload.get("REDIS_PASSWORD") or seeded_password
+        if not password:
+            password = "".join(
+                secrets.choice(string.ascii_letters + string.digits) for _ in range(password_length)
+            )
+
         host = (
             vars_payload.get("RAILWAY_PRIVATE_DOMAIN")
             or vars_payload.get("REDIS_HOST")
             or vars_payload.get("REDISHOST")
+            or inferred_host
         )
         port = (
             vars_payload.get("REDIS_PORT")
             or vars_payload.get("REDISPORT")
-            or "6379"
+            or default_port
         )
         redis_user = (
             vars_payload.get("REDISUSER")
             or vars_payload.get("REDIS_USERNAME")
-            or "default"
+            or default_user
         )
 
         if not password or not host:
@@ -595,6 +602,7 @@ class RailwayProvider:
 
         # Ensure all expected connection variables are present for Railway UI integrations
         desired_vars = {
+            "ALLOW_EMPTY_PASSWORD": "no",
             "REDIS_PASSWORD": password,
             "REDIS_HOST": host,
             "REDIS_PORT": port,
@@ -611,6 +619,11 @@ class RailwayProvider:
             if value and vars_payload.get(key) != value
         }
         if to_update:
+            logger.info(
+                "Updating Redis service %s with %d variable(s)",
+                service_name,
+                len(to_update),
+            )
             self.set_environment_variables(
                 service_id=service_id,
                 environment=environment,
