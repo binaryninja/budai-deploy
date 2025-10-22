@@ -379,6 +379,31 @@ class RailwayProvider:
                 return node
         return None
 
+    def _wait_for_service_instance_presence(
+        self,
+        service_id: str,
+        environment_id: str,
+        timeout_seconds: int,
+        poll_interval: int,
+    ) -> bool:
+        """Wait until Railway creates the first service instance."""
+        deadline = time.time() + max(1, timeout_seconds)
+        interval = max(1, poll_interval)
+
+        while time.time() < deadline:
+            instance = self._get_service_instance(service_id, environment_id)
+            if instance:
+                return True
+            logger.debug(
+                "Service instance not yet present (service=%s, environment=%s); retrying in %ss",
+                service_id,
+                environment_id,
+                interval,
+            )
+            time.sleep(interval)
+
+        return False
+
     def _connect_service_repo(
         self,
         service_id: str,
@@ -403,7 +428,8 @@ class RailwayProvider:
             input_payload["image"] = image
         env_id: Optional[str] = None
         poll_interval = int(os.getenv("RAILWAY_SERVICE_CONNECT_POLL_INTERVAL", "5"))
-        max_wait = int(os.getenv("RAILWAY_SERVICE_CONNECT_WAIT_SECONDS", "60"))
+        max_wait = int(os.getenv("RAILWAY_SERVICE_CONNECT_WAIT_SECONDS", "180"))
+        max_attempts = int(os.getenv("RAILWAY_SERVICE_CONNECT_MAX_ATTEMPTS", "6"))
 
         if environment:
             project_id = self.project_id
@@ -411,19 +437,12 @@ class RailwayProvider:
                 raise ValueError("Project ID required to resolve environment for serviceConnect.")
 
             env_id = self._get_environment_id(project_id, environment)
-            deadline = time.time() + max(1, max_wait)
-
-            while time.time() < deadline:
-                instance = self._get_service_instance(service_id, env_id)
-                if instance:
-                    break
-                logger.debug(
-                    "Waiting for service instance before connecting repo (service=%s, environment=%s)",
-                    service_id,
-                    environment,
-                )
-                time.sleep(max(1, poll_interval))
-            else:
+            if not self._wait_for_service_instance_presence(
+                service_id,
+                env_id,
+                timeout_seconds=max_wait,
+                poll_interval=poll_interval,
+            ):
                 logger.warning(
                     "Service instance not detected before serviceConnect (service=%s, environment=%s, wait=%ss)",
                     service_id,
@@ -432,7 +451,7 @@ class RailwayProvider:
                 )
 
         attempts = 0
-        max_attempts = 3 if env_id else 1
+        max_attempts = max(1, max_attempts if env_id else 1)
         while attempts < max_attempts:
             attempts += 1
             try:
