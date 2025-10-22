@@ -402,7 +402,7 @@ class RailwayProvider:
         if image:
             input_payload["image"] = image
         poll_interval = max(1, int(os.getenv("RAILWAY_SERVICE_CONNECT_POLL_INTERVAL", "5")))
-        max_attempts = max(1, int(os.getenv("RAILWAY_SERVICE_CONNECT_MAX_ATTEMPTS", "3")))
+        max_attempts = max(1, int(os.getenv("RAILWAY_SERVICE_CONNECT_MAX_ATTEMPTS", "1")))
 
         attempts = 0
         while attempts < max_attempts:
@@ -418,22 +418,8 @@ class RailwayProvider:
                 return
             except RailwayAPIError as exc:
                 message = str(exc)
-                if (
-                    "ServiceInstance not found" in message
-                    and attempts < max_attempts
-                ):
-                    logger.info(
-                        "Service instance not ready for serviceConnect (service=%s, environment=%s, attempt=%d/%d). Retrying in %ss.",
-                        service_id,
-                        environment,
-                        attempts,
-                        max_attempts,
-                        poll_interval,
-                    )
-                    time.sleep(max(1, poll_interval))
-                    continue
                 if "ServiceInstance not found" in message:
-                    logger.warning(
+                    logger.info(
                         "Proceeding despite Railway reporting missing service instance during serviceConnect "
                         "(service=%s, environment=%s): %s",
                         service_id,
