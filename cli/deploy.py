@@ -62,7 +62,7 @@ SERVICE_REPOS = {
     },
     "agent-followup": {
         "repo": "binaryninja/budai-agent-followup",
-        "branch": "master",
+        "branch": "main",
         "port": 8003,
     },
 }

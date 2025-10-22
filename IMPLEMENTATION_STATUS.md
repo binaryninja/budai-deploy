@@ -121,7 +121,7 @@
 | `VoiceCallStartedEvent` | API Gateway | None | ⚠️ Published but not consumed |
 | `VoiceCallEndedEvent` | **Missing** | Orchestrator | ❌ Not published (Voice Realtime missing) |
 | `FollowupRequiredEvent` | None | **Missing** | ❌ Not used |
-| `FollowupSentEvent` | **Missing** | None | ❌ Not published (Agent Followup missing) |
+| `FollowupSentEvent` | Orchestrator | `FollowupSentEvent` | ✅ Published with follow-up drafts |
 
 ---
 
