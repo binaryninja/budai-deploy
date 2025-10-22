@@ -6,6 +6,22 @@ PRIME_DIRECTIVE assisted and zero-touch modes.
 
 This CLI manages deployments of BudAI services to Railway, with each
 service deployed from its own GitHub repository.
+
+Railway Config-as-Code Integration:
+-----------------------------------
+This deployment tool leverages Railway's config-as-code feature. Each service
+repository should contain a railway.json file that defines build and deploy
+settings (start command, health checks, build command, etc.).
+
+When Railway deploys from GitHub:
+1. It automatically reads the railway.json from the service repo
+2. Applies those build/deploy settings to the deployment
+3. This deployment tool only needs to:
+   - Create/connect the service to the GitHub repo
+   - Set environment variables (secrets, URLs, etc.)
+   - Trigger the deployment
+
+See templates/ directory for example railway.json configurations.
 """
 
 from __future__ import annotations
@@ -170,7 +186,8 @@ class DeploymentOrchestrator:
             try:
                 service_info = SERVICE_REPOS[service_name]
                 
-                # Create or update the service
+                # Create or update the service connected to GitHub repo
+                # Railway will automatically read railway.json from the repo for build/deploy config
                 service_id = self.provider.create_service(
                     name=f"budai-{service_name}",
                     project_id=self.creds["railway_project_id"],

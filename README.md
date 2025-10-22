@@ -212,6 +212,37 @@ The deployment orchestrator manages these service repositories:
 | Orchestrator | [budai-orchestrator](https://github.com/binaryninja/budai-orchestrator) | 8001 |
 | Agent Summarizer | [budai-agent-summarizer](https://github.com/binaryninja/budai-agent-summarizer) | 8002 |
 
+### Railway Config as Code
+
+Each service repository should include a `railway.json` file to define build and deploy configuration. This approach:
+
+- **Simplifies deployment:** Railway automatically applies settings from the config file
+- **Version control:** Build/deploy configs are versioned with the code
+- **Transparency:** Settings are visible in the repository, not hidden in Railway dashboard
+
+See the [templates/README.md](templates/README.md) for example configurations and setup instructions.
+
+#### Example railway.json
+
+```json
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "pip install -r requirements.txt"
+  },
+  "deploy": {
+    "startCommand": "python -m uvicorn main:app --host 0.0.0.0 --port 8001",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
+  }
+}
+```
+
+**Note:** Environment variables are still managed via the deployment scripts or Railway dashboard for security.
+
 ### Adding New Services
 
 To add a new service:
