@@ -1,0 +1,98 @@
+# BudAI Development Environment Deployment Specification
+
+environment: development
+region: us-west-1
+
+services:
+  api-gateway:
+    enabled: true
+    resources:
+      memory_mb: 512
+      cpu_millicores: 500
+      replicas: 1
+    environment_variables:
+      LOG_LEVEL: DEBUG
+      ENABLE_TRACING: "true"
+    dependencies:
+      - orchestrator
+      - voice-realtime
+
+  orchestrator:
+    enabled: true
+    resources:
+      memory_mb: 512
+      cpu_millicores: 500
+      replicas: 1
+    environment_variables:
+      LOG_LEVEL: DEBUG
+      POLL_INTERVAL_SECONDS: "30"
+      MAX_CONCURRENT_WORKFLOWS: "5"
+    dependencies:
+      - agent-summarizer
+      - agent-followup
+      - agent-communicator
+
+  agent-summarizer:
+    enabled: true
+    resources:
+      memory_mb: 512
+      cpu_millicores: 500
+      replicas: 1
+    environment_variables:
+      LOG_LEVEL: DEBUG
+      REASONING_EFFORT: low
+      MAX_RETRIES: "3"
+
+  agent-followup:
+    enabled: true
+    resources:
+      memory_mb: 512
+      cpu_millicores: 500
+      replicas: 1
+    environment_variables:
+      LOG_LEVEL: DEBUG
+
+  agent-communicator:
+    enabled: true
+    resources:
+      memory_mb: 512
+      cpu_millicores: 500
+      replicas: 1
+    environment_variables:
+      LOG_LEVEL: DEBUG
+
+  voice-realtime:
+    enabled: true
+    resources:
+      memory_mb: 512
+      cpu_millicores: 500
+      replicas: 1
+    environment_variables:
+      LOG_LEVEL: DEBUG
+
+  slack-integration:
+    enabled: true
+    resources:
+      memory_mb: 512
+      cpu_millicores: 500
+      replicas: 1
+    environment_variables:
+      LOG_LEVEL: DEBUG
+
+secrets:
+  openai_api_key:
+    source: railway-vault
+    key: OPENAI_API_KEY
+  slack_signing_secret:
+    source: railway-vault
+    key: SLACK_SIGNING_SECRET
+  slack_bot_token:
+    source: railway-vault
+    key: SLACK_AUTHORIZATION
+
+features:
+  enable_metrics: true
+  enable_tracing: true
+  auto_rollback: true
+  health_check_interval: 30
+
