@@ -60,6 +60,11 @@ SERVICE_REPOS = {
         "branch": "master",
         "port": 8002,
     },
+    "agent-followup": {
+        "repo": "binaryninja/budai-agent-followup",
+        "branch": "master",
+        "port": 8003,
+    },
 }
 
 
@@ -94,7 +99,7 @@ class DeploymentOrchestrator:
         self.deployment_order = [
             "orchestrator",      # Deploy first (other services depend on it)
             "agent-summarizer",  # Deploy agents
-            # "agent-followup",
+            "agent-followup",
             # "agent-communicator",
             # "voice-realtime",
             # "slack-integration",

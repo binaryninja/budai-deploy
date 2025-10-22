@@ -50,6 +50,16 @@ git commit -m "Add Railway config as code"
 git push
 ```
 
+### Example: Agent Followup
+
+```bash
+cd ~/budai-agent-followup
+cp ../budai-deploy/templates/agent-followup-railway.json ./railway.json
+git add railway.json
+git commit -m "Add Railway config as code"
+git push
+```
+
 ## Configuration Sections
 
 ### Build Section

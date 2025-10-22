@@ -170,11 +170,27 @@ class OrchestratorSettings(BaseServiceSettings):
     # Workflow configuration
     poll_interval_seconds: int = Field(30, description="Event polling interval")
     max_concurrent_workflows: int = Field(10, description="Max concurrent workflow executions")
+    followup_delay_seconds: int = Field(900, description="Delay in seconds before invoking follow-up workflow")
 
     # Agent service URLs
     agent_summarizer_url: str = Field("http://agent-summarizer:8002")
     agent_followup_url: str = Field("http://agent-followup:8003")
     agent_communicator_url: str = Field("http://agent-communicator:8004")
+
+    # Follow-up defaults
+    followup_recipient_emails: Optional[str] = Field(
+        None,
+        description="Comma-separated list of default follow-up recipient emails",
+    )
+    followup_tone: str = Field("professional", description="Default tone for follow-up drafts")
+    followup_include_slack: bool = Field(
+        False,
+        description="Whether to request Slack summary drafts by default",
+    )
+    followup_slack_channel: Optional[str] = Field(
+        None,
+        description="Default Slack channel for follow-up digests",
+    )
 
 
 class AgentServiceSettings(BaseServiceSettings):
