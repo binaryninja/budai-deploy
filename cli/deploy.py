@@ -65,6 +65,11 @@ SERVICE_REPOS = {
         "branch": "main",
         "port": 8003,
     },
+    "slack-integration": {
+        "repo": "binaryninja/budai-slack-integration",
+        "branch": "main",
+        "port": 8006,
+    },
 }
 
 
@@ -104,6 +109,7 @@ class DeploymentOrchestrator:
             # "voice-realtime",
             # "slack-integration",
             "api-gateway",       # Deploy last (routes to all services)
+            "slack-integration",
         ]
         
         self.reports: List[DeploymentReport] = []
@@ -202,6 +208,7 @@ class DeploymentOrchestrator:
                 static_vars = {
                     "BUDAI_SERVICE_NAME": service_name,
                     "BUDAI_SERVICE_VERSION": "1.0.0",
+                    "PORT": str(service_info["port"]),
                 }
                 
                 # Add service-specific static variables (internal URLs)
@@ -212,6 +219,10 @@ class DeploymentOrchestrator:
                 elif service_name == "orchestrator":
                     static_vars.update({
                         "BUDAI_AGENT_SUMMARIZER_URL": f"http://budai-agent-summarizer.railway.internal:{SERVICE_REPOS['agent-summarizer']['port']}",
+                    })
+                elif service_name == "slack-integration":
+                    static_vars.update({
+                        "BUDAI_API_GATEWAY_URL": f"http://budai-api-gateway.railway.internal:{SERVICE_REPOS['api-gateway']['port']}",
                     })
                 
                 # Prepare dynamic variables (change between deployments/environments)
@@ -226,6 +237,19 @@ class DeploymentOrchestrator:
                     dynamic_vars.update({
                         "BUDAI_SLACK_SIGNING_SECRET": self.creds.get("slack_signing_secret", ""),
                         "BUDAI_SLACK_BOT_TOKEN": self.creds.get("slack_bot_token", ""),
+                    })
+                elif service_name == "slack-integration":
+                    slack_bot_token = self.creds.get("slack_bot_token", "")
+                    slack_signing_secret = self.creds.get("slack_signing_secret", "")
+                    if not slack_bot_token or not slack_signing_secret:
+                        raise RuntimeError(
+                            "Slack integration requires both slack_bot_token and slack_signing_secret credentials."
+                        )
+                    dynamic_vars.update({
+                        "SLACK_BOT_TOKEN": slack_bot_token,
+                        "SLACK_SIGNING_SECRET": slack_signing_secret,
+                        "BUDAI_SLACK_BOT_TOKEN": slack_bot_token,
+                        "BUDAI_SLACK_SIGNING_SECRET": slack_signing_secret,
                     })
                 
                 # For NEW services: combine all variables and pass during creation
