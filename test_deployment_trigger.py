@@ -172,16 +172,73 @@ if instance:
         print(f"  Latest deployment: {deployment['id']}")
         print(f"  Status: {deployment.get('status')}")
     else:
-        print("  No deployments yet - attempting to trigger...")
+        print("  No deployments yet - attempting to trigger first deployment...")
+        print()
         
+        # Method 1: Try WITHOUT latestCommit parameter
+        print("Method 1: serviceInstanceDeploy without latestCommit...")
+        try:
+            query = """
+            mutation TriggerDeploy($serviceId: String!, $environmentId: String!) {
+                serviceInstanceDeploy(
+                    serviceId: $serviceId
+                    environmentId: $environmentId
+                ) {
+                    id
+                }
+            }
+            """
+            result = provider._graphql_query(
+                query,
+                {
+                    "serviceId": service_id,
+                    "environmentId": env_id
+                }
+            )
+            deployment = result.get("serviceInstanceDeploy", {})
+            if deployment and deployment.get("id"):
+                print(f"✓ SUCCESS! Deployment ID: {deployment['id']}")
+        except Exception as e:
+            print(f"✗ Failed: {e}")
+        
+        # Method 2: Try with latestCommit=false
+        print("\nMethod 2: serviceInstanceDeploy with latestCommit=false...")
+        try:
+            query = """
+            mutation TriggerDeploy($serviceId: String!, $environmentId: String!, $latestCommit: Boolean) {
+                serviceInstanceDeploy(
+                    serviceId: $serviceId
+                    environmentId: $environmentId
+                    latestCommit: $latestCommit
+                ) {
+                    id
+                }
+            }
+            """
+            result = provider._graphql_query(
+                query,
+                {
+                    "serviceId": service_id,
+                    "environmentId": env_id,
+                    "latestCommit": False
+                }
+            )
+            deployment = result.get("serviceInstanceDeploy", {})
+            if deployment and deployment.get("id"):
+                print(f"✓ SUCCESS! Deployment ID: {deployment['id']}")
+        except Exception as e:
+            print(f"✗ Failed: {e}")
+        
+        # Method 3: Original method with latestCommit=true
+        print("\nMethod 3: Using deploy_service() helper...")
         try:
             deployment_id = provider.deploy_service(
                 service_id=service_id,
                 environment=environment
             )
-            print(f"✓ Deployment triggered: {deployment_id}")
+            print(f"✓ SUCCESS! Deployment ID: {deployment_id}")
         except Exception as e:
-            print(f"✗ deploy_service failed: {e}")
+            print(f"✗ Failed: {e}")
 
 print()
 print("=" * 80)
