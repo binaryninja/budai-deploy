@@ -379,31 +379,6 @@ class RailwayProvider:
                 return node
         return None
 
-    def _wait_for_service_instance_presence(
-        self,
-        service_id: str,
-        environment_id: str,
-        timeout_seconds: int,
-        poll_interval: int,
-    ) -> bool:
-        """Wait until Railway creates the first service instance."""
-        deadline = time.time() + max(1, timeout_seconds)
-        interval = max(1, poll_interval)
-
-        while time.time() < deadline:
-            instance = self._get_service_instance(service_id, environment_id)
-            if instance:
-                return True
-            logger.debug(
-                "Service instance not yet present (service=%s, environment=%s); retrying in %ss",
-                service_id,
-                environment_id,
-                interval,
-            )
-            time.sleep(interval)
-
-        return False
-
     def _connect_service_repo(
         self,
         service_id: str,
@@ -426,32 +401,10 @@ class RailwayProvider:
             input_payload["branch"] = branch
         if image:
             input_payload["image"] = image
-        env_id: Optional[str] = None
-        poll_interval = int(os.getenv("RAILWAY_SERVICE_CONNECT_POLL_INTERVAL", "5"))
-        max_wait = int(os.getenv("RAILWAY_SERVICE_CONNECT_WAIT_SECONDS", "180"))
-        max_attempts = int(os.getenv("RAILWAY_SERVICE_CONNECT_MAX_ATTEMPTS", "6"))
-
-        if environment:
-            project_id = self.project_id
-            if not project_id:
-                raise ValueError("Project ID required to resolve environment for serviceConnect.")
-
-            env_id = self._get_environment_id(project_id, environment)
-            if not self._wait_for_service_instance_presence(
-                service_id,
-                env_id,
-                timeout_seconds=max_wait,
-                poll_interval=poll_interval,
-            ):
-                logger.warning(
-                    "Service instance not detected before serviceConnect (service=%s, environment=%s, wait=%ss)",
-                    service_id,
-                    environment,
-                    max_wait,
-                )
+        poll_interval = max(1, int(os.getenv("RAILWAY_SERVICE_CONNECT_POLL_INTERVAL", "5")))
+        max_attempts = max(1, int(os.getenv("RAILWAY_SERVICE_CONNECT_MAX_ATTEMPTS", "3")))
 
         attempts = 0
-        max_attempts = max(1, max_attempts if env_id else 1)
         while attempts < max_attempts:
             attempts += 1
             try:
@@ -466,8 +419,7 @@ class RailwayProvider:
             except RailwayAPIError as exc:
                 message = str(exc)
                 if (
-                    env_id
-                    and "ServiceInstance not found" in message
+                    "ServiceInstance not found" in message
                     and attempts < max_attempts
                 ):
                     logger.info(
@@ -480,6 +432,15 @@ class RailwayProvider:
                     )
                     time.sleep(max(1, poll_interval))
                     continue
+                if "ServiceInstance not found" in message:
+                    logger.warning(
+                        "Proceeding despite Railway reporting missing service instance during serviceConnect "
+                        "(service=%s, environment=%s): %s",
+                        service_id,
+                        environment,
+                        message,
+                    )
+                    return
                 raise
 
     def _wait_for_service_instance(
