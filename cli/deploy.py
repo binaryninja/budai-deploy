@@ -137,8 +137,8 @@ class DeploymentOrchestrator:
                 logger.info("  Resources:")
                 logger.info("    - Memory: %d MB", service_config.resources.memory_mb)
                 logger.info("    - CPU: %d millicores", service_config.resources.cpu_millicores)
-                if service_config.replicas and service_config.replicas > 1:
-                    logger.info("    - Replicas: %d", service_config.replicas)
+                if service_config.resources.replicas and service_config.resources.replicas > 1:
+                    logger.info("    - Replicas: %d", service_config.resources.replicas)
             logger.info("")
         
         logger.info("=" * 80)
