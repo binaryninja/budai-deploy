@@ -243,6 +243,7 @@ class DeploymentOrchestrator:
                 
                 # For EXISTING services: only update variables that have changed
                 # For NEW services: skip this (all vars already set during creation)
+                should_deploy = False
                 if not is_new_service:
                     # Filter out empty values
                     non_empty_vars = {k: v for k, v in dynamic_vars.items() if v}
@@ -267,15 +268,33 @@ class DeploymentOrchestrator:
                             logger.info("Updating %d changed variable(s): %s", 
                                       len(changed_vars), ", ".join(changed_vars.keys()))
                             # Set environment variables
-                            # Note: Each variable triggers a separate deployment due to Railway API limitations
+                            # Note: Each variable change triggers a deployment automatically
                             self.provider.set_environment_variables(
                                 service_id=service_id,
                                 environment=self.environment,
                                 variables=changed_vars,
                                 project_id=self.creds["railway_project_id"]
                             )
+                            # Variable updates trigger deployment automatically
                         else:
-                            logger.info("No variables changed, skipping update")
+                            logger.info("No variables changed, triggering deployment anyway")
+                            should_deploy = True
+                    else:
+                        should_deploy = True
+                else:
+                    # New service - trigger initial deployment
+                    logger.info("New service created, triggering deployment")
+                    should_deploy = True
+                
+                # Explicitly trigger deployment if needed
+                if should_deploy:
+                    logger.info("Triggering deployment for %s...", service_name)
+                    deployment_id = self.provider.deploy_service(
+                        service_id=service_id,
+                        environment=self.environment,
+                        project_id=self.creds["railway_project_id"]
+                    )
+                    logger.info("Deployment triggered (ID: %s)", deployment_id)
                 
                 logger.info("✓ %s: Deployed successfully (service ID: %s)", service_name, service_id)
                 
