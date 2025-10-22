@@ -30,7 +30,7 @@ print("TESTING DEPLOYMENT TRIGGER")
 print("=" * 80)
 print()
 
-# List all services
+# List all services and find budai-orchestrator
 print("Listing services...")
 services = provider._list_services(creds["railway_project_id"])
 print(f"Found {len(services)} service(s)")
@@ -43,10 +43,23 @@ if not services:
 for idx, svc in enumerate(services, 1):
     print(f"{idx}. {svc.get('name')} (ID: {svc['id']})")
 
-# Use first service for testing
-service = services[0]
+# Find budai-orchestrator service
+target_service_name = "budai-orchestrator"
+service = None
+for svc in services:
+    if svc.get('name') == target_service_name:
+        service = svc
+        break
+
+if not service:
+    print(f"\n✗ Service '{target_service_name}' not found!")
+    print("Available services:")
+    for svc in services:
+        print(f"  - {svc.get('name')}")
+    sys.exit(1)
+
 service_id = service['id']
-service_name = service.get('name', 'unknown')
+service_name = service.get('name')
 
 print()
 print(f"Testing with: {service_name}")
