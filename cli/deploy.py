@@ -241,6 +241,17 @@ class DeploymentOrchestrator:
                     variables=initial_vars,
                 )
                 
+                # For NEW services, explicitly connect the repo with branch
+                # serviceCreate doesn't support branch, so we use serviceConnect
+                if is_new_service:
+                    logger.info("Connecting service to branch '%s'...", service_info["branch"])
+                    self.provider._connect_service_repo(
+                        service_id=service_id,
+                        repo=service_info["repo"],
+                        branch=service_info["branch"]
+                    )
+                    logger.info("Service connected to GitHub repo and branch")
+                
                 # For EXISTING services: only update variables that have changed
                 # For NEW services: skip this (all vars already set during creation)
                 if not is_new_service:
