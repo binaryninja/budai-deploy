@@ -75,6 +75,11 @@ SERVICE_REPOS = {
         "branch": "main",
         "port": 8006,
     },
+    "voice-frontend": {
+        "repo": "binaryninja/budai-voice-frontend",
+        "branch": "main",
+        "port": 3000,
+    },
 }
 
 
@@ -114,6 +119,7 @@ class DeploymentOrchestrator:
             "voice-realtime",
             "api-gateway",       # Deploy after dependencies are ready
             "slack-integration",
+            "voice-frontend",
         ]
         
         self.reports: List[DeploymentReport] = []
