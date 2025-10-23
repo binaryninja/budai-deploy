@@ -16,6 +16,7 @@ services:
     dependencies:
       - orchestrator
       - voice-realtime
+      - agent-notion
 
   orchestrator:
     enabled: true
@@ -45,6 +46,15 @@ services:
       TIMEOUT_SECONDS: "300"
 
   agent-followup:
+    enabled: true
+    resources:
+      memory_mb: 512
+      cpu_millicores: 500
+      replicas: 2
+    environment_variables:
+      LOG_LEVEL: INFO
+
+  agent-notion:
     enabled: true
     resources:
       memory_mb: 512
@@ -96,6 +106,9 @@ secrets:
   gmail_credentials:
     source: railway-vault
     key: GMAIL_AUTHORIZATION
+  notion_token:
+    source: railway-vault
+    key: NOTION_TOKEN
 
 features:
   enable_metrics: true
@@ -104,4 +117,3 @@ features:
   health_check_interval: 30
   enable_alerting: true
   enable_autoscaling: true
-

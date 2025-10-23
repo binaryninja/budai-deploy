@@ -16,6 +16,7 @@ services:
     dependencies:
       - orchestrator
       - voice-realtime
+      - agent-notion
 
   orchestrator:
     enabled: true
@@ -44,6 +45,15 @@ services:
       MAX_RETRIES: "3"
 
   agent-followup:
+    enabled: true
+    resources:
+      memory_mb: 512
+      cpu_millicores: 500
+      replicas: 1
+    environment_variables:
+      LOG_LEVEL: DEBUG
+
+  agent-notion:
     enabled: true
     resources:
       memory_mb: 512
@@ -89,10 +99,12 @@ secrets:
   slack_bot_token:
     source: railway-vault
     key: SLACK_AUTHORIZATION
+  notion_token:
+    source: railway-vault
+    key: NOTION_TOKEN
 
 features:
   enable_metrics: true
   enable_tracing: true
   auto_rollback: true
   health_check_interval: 30
-

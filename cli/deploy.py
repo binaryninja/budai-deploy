@@ -65,6 +65,11 @@ SERVICE_REPOS = {
         "branch": "main",
         "port": 8003,
     },
+    "agent-notion": {
+        "repo": "binaryninja/budai-agent-notion",
+        "branch": "main",
+        "port": 8007,
+    },
     "voice-realtime": {
         "repo": "binaryninja/budai-voice-realtime",
         "branch": "main",
@@ -115,6 +120,7 @@ class DeploymentOrchestrator:
             "orchestrator",      # Deploy first (other services depend on it)
             "agent-summarizer",  # Deploy agents
             "agent-followup",
+            "agent-notion",
             # "agent-communicator",
             "voice-realtime",
             "api-gateway",       # Deploy after dependencies are ready
@@ -228,6 +234,7 @@ class DeploymentOrchestrator:
                 if service_name == "api-gateway":
                     static_vars.update({
                         "BUDAI_ORCHESTRATOR_URL": f"http://budai-orchestrator.railway.internal:{SERVICE_REPOS['orchestrator']['port']}",
+                        "BUDAI_NOTION_AGENT_URL": f"http://budai-agent-notion.railway.internal:{SERVICE_REPOS['agent-notion']['port']}",
                     })
                 elif service_name == "orchestrator":
                     static_vars.update({
@@ -280,6 +287,14 @@ class DeploymentOrchestrator:
                         "SLACK_SIGNING_SECRET": slack_signing_secret,
                         "BUDAI_SLACK_BOT_TOKEN": slack_bot_token,
                         "BUDAI_SLACK_SIGNING_SECRET": slack_signing_secret,
+                    })
+                elif service_name == "agent-notion":
+                    notion_token = self.creds.get("notion_token") or self.creds.get("BUDAI_NOTION_TOKEN", "")
+                    if not notion_token:
+                        raise RuntimeError("Notion agent requires 'notion_token' credential.")
+                    dynamic_vars.update({
+                        "NOTION_TOKEN": notion_token,
+                        "BUDAI_NOTION_TOKEN": notion_token,
                     })
                 
                 # For NEW services: combine all variables and pass during creation
