@@ -82,7 +82,7 @@ SERVICE_REPOS = {
     },
     "voice-frontend": {
         "repo": "binaryninja/budai-voice-frontend",
-        "branch": "main",
+        "branch": "master",
         "port": 3000,
     },
 }
@@ -315,17 +315,19 @@ class DeploymentOrchestrator:
                     variables=initial_vars,
                 )
                 
-                # For NEW services, explicitly connect the repo with branch
-                # serviceCreate doesn't support branch overrides, so we use serviceConnect
+                # For NEW services, explicitly connect the repo with branch once instances exist
                 if is_new_service:
-                    logger.info("Connecting service to branch '%s'...", service_info["branch"])
+                    logger.info(
+                        "Connecting new service to repo %s (branch %s)",
+                        service_info["repo"],
+                        service_info["branch"],
+                    )
                     self.provider._connect_service_repo(
                         service_id=service_id,
                         repo=service_info["repo"],
                         branch=service_info["branch"],
                         environment=self.environment,
                     )
-                    logger.info("Service connected to GitHub repo and branch")
                 
                 # For EXISTING services: only update variables that have changed
                 # For NEW services: skip this (all vars already set during creation)

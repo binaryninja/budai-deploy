@@ -401,6 +401,7 @@ class RailwayProvider:
             input_payload["branch"] = branch
         if image:
             input_payload["image"] = image
+
         poll_interval = max(1, int(os.getenv("RAILWAY_SERVICE_CONNECT_POLL_INTERVAL", "5")))
         max_attempts = max(1, int(os.getenv("RAILWAY_SERVICE_CONNECT_MAX_ATTEMPTS", "1")))
 
@@ -418,16 +419,22 @@ class RailwayProvider:
                 return
             except RailwayAPIError as exc:
                 message = str(exc)
-                if "ServiceInstance not found" in message:
+                normalized = message.lower()
+                if "serviceinstance not found" in normalized or "problem processing request" in normalized:
                     logger.info(
-                        "Proceeding despite Railway reporting missing service instance during serviceConnect "
-                        "(service=%s, environment=%s): %s",
+                        "Railway reported transient connect issue for service %s (environment=%s): %s; continuing",
                         service_id,
-                        environment,
+                        environment or "default",
                         message,
                     )
                     return
                 raise
+        logger.info(
+            "Railway serviceConnect retries exhausted for repo %s (branch=%s) on service %s; continuing",
+            repo,
+            branch,
+            service_id,
+        )
 
     def _wait_for_service_instance(
         self,
