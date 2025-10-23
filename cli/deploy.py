@@ -65,6 +65,11 @@ SERVICE_REPOS = {
         "branch": "main",
         "port": 8003,
     },
+    "voice-realtime": {
+        "repo": "binaryninja/budai-voice-realtime",
+        "branch": "main",
+        "port": 8005,
+    },
     "slack-integration": {
         "repo": "binaryninja/budai-slack-integration",
         "branch": "main",
@@ -106,9 +111,8 @@ class DeploymentOrchestrator:
             "agent-summarizer",  # Deploy agents
             "agent-followup",
             # "agent-communicator",
-            # "voice-realtime",
-            # "slack-integration",
-            "api-gateway",       # Deploy last (routes to all services)
+            "voice-realtime",
+            "api-gateway",       # Deploy after dependencies are ready
             "slack-integration",
         ]
         
@@ -197,6 +201,7 @@ class DeploymentOrchestrator:
             try:
                 service_info = SERVICE_REPOS[service_name]
                 slack_internal_url = f"http://budai-slack-integration.railway.internal:{SERVICE_REPOS['slack-integration']['port']}"
+                voice_internal_url = f"http://budai-voice-realtime.railway.internal:{SERVICE_REPOS['voice-realtime']['port']}"
                 
                 # Check if service already exists
                 existing_service = self.provider._get_service_by_name(
@@ -235,6 +240,8 @@ class DeploymentOrchestrator:
 
                 if service_name in {"api-gateway", "orchestrator"}:
                     dynamic_vars["BUDAI_SLACK_INTEGRATION_URL"] = slack_internal_url
+                if service_name in {"api-gateway", "slack-integration"}:
+                    dynamic_vars["BUDAI_VOICE_REALTIME_URL"] = voice_internal_url
                 
                 # Add service-specific dynamic variables (secrets)
                 if service_name == "api-gateway":
