@@ -196,6 +196,7 @@ class DeploymentOrchestrator:
             
             try:
                 service_info = SERVICE_REPOS[service_name]
+                slack_internal_url = f"http://budai-slack-integration.railway.internal:{SERVICE_REPOS['slack-integration']['port']}"
                 
                 # Check if service already exists
                 existing_service = self.provider._get_service_by_name(
@@ -231,12 +232,19 @@ class DeploymentOrchestrator:
                     "BUDAI_REDIS_URL": self.creds["redis_url"],
                     "BUDAI_OPENAI_API_KEY": self.creds.get("openai_api_key", ""),
                 }
+
+                if service_name in {"api-gateway", "orchestrator"}:
+                    dynamic_vars["BUDAI_SLACK_INTEGRATION_URL"] = slack_internal_url
                 
                 # Add service-specific dynamic variables (secrets)
                 if service_name == "api-gateway":
                     dynamic_vars.update({
                         "BUDAI_SLACK_SIGNING_SECRET": self.creds.get("slack_signing_secret", ""),
                         "BUDAI_SLACK_BOT_TOKEN": self.creds.get("slack_bot_token", ""),
+                    })
+                elif service_name == "orchestrator":
+                    dynamic_vars.update({
+                        "BUDAI_SLACK_SIGNING_SECRET": self.creds.get("slack_signing_secret", ""),
                     })
                 elif service_name == "slack-integration":
                     slack_bot_token = self.creds.get("slack_bot_token", "")
