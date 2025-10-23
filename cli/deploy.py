@@ -208,6 +208,7 @@ class DeploymentOrchestrator:
                 service_info = SERVICE_REPOS[service_name]
                 slack_internal_url = f"http://budai-slack-integration.railway.internal:{SERVICE_REPOS['slack-integration']['port']}"
                 voice_internal_url = f"http://budai-voice-realtime.railway.internal:{SERVICE_REPOS['voice-realtime']['port']}"
+                api_gateway_internal_url = f"http://budai-api-gateway.railway.internal:{SERVICE_REPOS['api-gateway']['port']}"
                 
                 # Check if service already exists
                 existing_service = self.provider._get_service_by_name(
@@ -248,6 +249,14 @@ class DeploymentOrchestrator:
                     dynamic_vars["BUDAI_SLACK_INTEGRATION_URL"] = slack_internal_url
                 if service_name in {"api-gateway", "slack-integration"}:
                     dynamic_vars["BUDAI_VOICE_REALTIME_URL"] = voice_internal_url
+                if service_name == "voice-frontend":
+                    dynamic_vars.update({
+                        "BUDAI_API_GATEWAY_BASE_URL": api_gateway_internal_url,
+                        "BUDAI_VOICE_SERVICE_BASE_URL": voice_internal_url,
+                    })
+                    assistant_base_url = self.creds.get("assistant_api_base_url", "")
+                    if assistant_base_url:
+                        dynamic_vars["BUDAI_ASSISTANT_API_BASE_URL"] = assistant_base_url
                 
                 # Add service-specific dynamic variables (secrets)
                 if service_name == "api-gateway":
